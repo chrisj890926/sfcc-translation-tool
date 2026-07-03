@@ -141,12 +141,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const targetLanguages = formData.getAll('targetLanguages');
     const protectedTerms = formData.get('protectedTerms');
     const xmlFormat = formData.get('xmlFormat') || 'page-designer';
+    // Map the UI format selector to the backend translator mode.
+    const mode = xmlFormat === 'product-section' ? 'product' : 'page-designer';
 
     const payload = {
       xmlContents: fileContents,
       targetLanguages,
       protectedTerms,
-      xmlFormat
+      mode,
+      xmlFormat // kept for backward compatibility
     };
 
     // Update UI state

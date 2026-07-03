@@ -1,13 +1,17 @@
 {
   "name": "pd-translate-script",
-  "version": "1.0.0",
-  "description": "A web UI for XML translation script",
-  "main": "server.js",
+  "version": "2.0.0",
+  "description": "A web UI for translating SFCC Product & Page Designer XML",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node src/server.js",
+    "test": "node test/run.js"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "latest"
   },
   "author": "",
   "license": "ISC"
