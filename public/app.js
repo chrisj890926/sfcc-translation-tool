@@ -14,6 +14,79 @@ document.addEventListener('DOMContentLoaded', () => {
   const errorMsg = document.getElementById('errorMsg');
   const resetBtn = document.getElementById('resetBtn');
 
+  // Progress UI elements
+  const progressArea = document.getElementById('progressArea');
+  const progressBarFill = document.getElementById('progressBarFill');
+  const progressPhase = document.getElementById('progressPhase');
+  const progressPct = document.getElementById('progressPct');
+  const progressComponent = document.getElementById('progressComponent');
+  const progressLocale = document.getElementById('progressLocale');
+  const statTranslated = document.getElementById('statTranslated');
+  const statSkipped = document.getElementById('statSkipped');
+  const statFailed = document.getElementById('statFailed');
+  const statElapsed = document.getElementById('statElapsed');
+  const statRemaining = document.getElementById('statRemaining');
+  const statProvider = document.getElementById('statProvider');
+  const statModel = document.getElementById('statModel');
+  const statInputTokens = document.getElementById('statInputTokens');
+  const statOutputTokens = document.getElementById('statOutputTokens');
+  const statCost = document.getElementById('statCost');
+  const extractionInfo = document.getElementById('extractionInfo');
+
+  let pollTimer = null;
+
+  function fmtDuration(seconds) {
+    if (seconds == null || !isFinite(seconds)) return '—';
+    const s = Math.max(0, Math.round(seconds));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    return `${m}m ${s % 60}s`;
+  }
+
+  function renderProgress(status) {
+    const pct = Math.max(0, Math.min(100, status.progress || 0));
+    progressBarFill.style.width = `${pct}%`;
+    progressPct.textContent = `${pct}%`;
+    progressPhase.textContent = status.currentPhase || '…';
+    progressComponent.textContent = status.currentComponent || '—';
+    progressLocale.textContent = status.currentLocale || '—';
+    statTranslated.textContent = status.translatedCount ?? 0;
+    statSkipped.textContent = status.skippedCount ?? 0;
+    statFailed.textContent = status.failedCount ?? 0;
+    statElapsed.textContent = fmtDuration(status.elapsedSeconds);
+    statProvider.textContent = status.provider || '—';
+    statModel.textContent = status.model || '—';
+    statInputTokens.textContent = (status.inputTokens ?? 0).toLocaleString();
+    statOutputTokens.textContent = (status.outputTokens ?? 0).toLocaleString();
+    statCost.textContent = `$${(status.estimatedCost ?? 0).toFixed(4)}`;
+
+    // Estimated remaining = elapsed * (100 - pct) / pct (linear extrapolation).
+    let remaining = null;
+    if (pct > 0 && pct < 100 && status.elapsedSeconds > 0) {
+      remaining = (status.elapsedSeconds * (100 - pct)) / pct;
+    } else if (pct >= 100) {
+      remaining = 0;
+    }
+    statRemaining.textContent = remaining == null ? '—' : fmtDuration(remaining);
+
+    const ex = status.extraction;
+    if (ex && ex.reducedContentCount != null) {
+      extractionInfo.classList.remove('hidden');
+      const label = ex.label || 'Reduced';
+      const unit = ex.unit || 'items';
+      let msg = `<span class="lbl">${label}:</span> ${ex.originalContentCount.toLocaleString()} → ${ex.reducedContentCount} ${unit}`;
+      if (ex.includedIds && ex.includedIds.length) {
+        msg += ` &nbsp;·&nbsp; <span class="lbl">ids:</span> ${ex.includedIds.join(', ')}`;
+      }
+      if (ex.missingSeeds && ex.missingSeeds.length) {
+        msg += ` &nbsp;·&nbsp; <span class="lbl" style="color:#e0803a">not found:</span> ${ex.missingSeeds.join(', ')}`;
+      }
+      extractionInfo.innerHTML = msg;
+    } else {
+      extractionInfo.classList.add('hidden');
+    }
+  }
+
   // Track selected files as an array
   let selectedFiles = [];
 
@@ -22,12 +95,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Handle XML Format Selection UI Toggles
   const formatOptions = document.querySelectorAll('.format-option');
+  const productIdsGroup = document.getElementById('productIdsGroup');
+
+  function syncProductIdsVisibility() {
+    // Extraction now applies to both Page Designer libraries and Product catalogs.
+    productIdsGroup.style.display = '';
+  }
+
   formatOptions.forEach(option => {
     option.addEventListener('click', () => {
       formatOptions.forEach(opt => opt.classList.remove('active'));
       option.classList.add('active');
+      const radio = option.querySelector('input[type="radio"]');
+      if (radio) radio.checked = true;
+      syncProductIdsVisibility();
     });
   });
+  syncProductIdsVisibility();
 
   ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
     dropZone.addEventListener(eventName, preventDefaults, false);
@@ -143,72 +227,107 @@ document.addEventListener('DOMContentLoaded', () => {
     const xmlFormat = formData.get('xmlFormat') || 'page-designer';
     // Map the UI format selector to the backend translator mode.
     const mode = xmlFormat === 'product-section' ? 'product' : 'page-designer';
+    const productIds = (formData.get('productIds') || '').trim();
 
     const payload = {
       xmlContents: fileContents,
       targetLanguages,
       protectedTerms,
       mode,
-      xmlFormat // kept for backward compatibility
+      xmlFormat, // kept for backward compatibility
+      productIds // comma-separated; server extracts the subtree(s) before translating
     };
 
-    // Update UI state
+    // Determine download filename + completion message up front.
     const fileCount = selectedFiles.length;
+    let downloadName;
+    let completeMsg;
+    if (fileCount > 1) {
+      downloadName = xmlFormat === 'product-section' ? 'merged-translated.xml' : 'merged-xdefault-cloned.xml';
+      completeMsg = `${fileCount} files translated and merged into one XML file.`;
+    } else {
+      const suffix = xmlFormat === 'product-section' ? '.translated.xml' : '.xdefault-cloned.xml';
+      downloadName = selectedFiles[0].name.replace('.xml', suffix);
+      completeMsg = 'Your translated XML file is ready.';
+    }
+
+    // Update UI state
     translateBtn.disabled = true;
-    btnText.textContent = fileCount > 1
-      ? `Translating ${fileCount} files...`
-      : 'Translating...';
+    btnText.textContent = fileCount > 1 ? `Translating ${fileCount} files...` : 'Translating...';
     spinner.classList.remove('hidden');
     errorArea.classList.add('hidden');
     resultArea.classList.add('hidden');
+    progressArea.classList.remove('hidden');
+    renderProgress({ progress: 0, currentPhase: 'Starting…' });
 
     try {
       const response = await fetch('/api/translate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-
       const data = await response.json();
-
       if (!response.ok) {
         throw new Error(data.error || 'Translation failed.');
       }
-
-      // Handle file download
-      const blob = new Blob([data.xmlContent], { type: 'application/xml' });
-      const url = window.URL.createObjectURL(blob);
-      
-      downloadLink.href = url;
-
-      // Determine download filename
-      let downloadName;
-      if (fileCount > 1) {
-        downloadName = xmlFormat === 'product-section'
-          ? 'merged-translated.xml'
-          : 'merged-xdefault-cloned.xml';
-        resultMsg.textContent = `${fileCount} files translated and merged into one XML file.`;
-      } else {
-        const originalName = selectedFiles[0].name;
-        const suffix = xmlFormat === 'product-section' ? '.translated.xml' : '.xdefault-cloned.xml';
-        downloadName = originalName.replace('.xml', suffix);
-        resultMsg.textContent = 'Your translated XML file is ready.';
-      }
-      downloadLink.download = downloadName;
-      
-      resultArea.classList.remove('hidden');
-
+      pollJob(data.jobId, downloadName, completeMsg);
     } catch (error) {
+      finishRun();
       showError(error.message);
-    } finally {
-      // Reset UI state
-      translateBtn.disabled = false;
-      btnText.textContent = 'Translate XML';
-      spinner.classList.add('hidden');
     }
   });
+
+  function finishRun() {
+    translateBtn.disabled = false;
+    btnText.textContent = 'Translate XML';
+    spinner.classList.add('hidden');
+  }
+
+  function pollJob(jobId, downloadName, completeMsg) {
+    if (pollTimer) clearInterval(pollTimer);
+
+    const tick = async () => {
+      let status;
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`);
+        status = await res.json();
+        if (!res.ok) throw new Error(status.error || 'Failed to fetch job status.');
+      } catch (err) {
+        clearInterval(pollTimer);
+        finishRun();
+        showError(err.message);
+        return;
+      }
+
+      renderProgress(status);
+
+      if (status.status === 'completed') {
+        clearInterval(pollTimer);
+        try {
+          const r = await fetch(`/api/jobs/${jobId}/result`);
+          if (!r.ok) throw new Error('Failed to download translated XML.');
+          const xml = await r.text();
+          const blob = new Blob([xml], { type: 'application/xml' });
+          downloadLink.href = window.URL.createObjectURL(blob);
+          downloadLink.download = downloadName;
+          resultMsg.textContent = completeMsg;
+          progressArea.classList.add('hidden');
+          resultArea.classList.remove('hidden');
+        } catch (err) {
+          showError(err.message);
+        }
+        finishRun();
+      } else if (status.status === 'failed') {
+        clearInterval(pollTimer);
+        progressArea.classList.add('hidden');
+        finishRun();
+        showError(status.error || 'Translation failed.');
+      }
+    };
+
+    tick();
+    pollTimer = setInterval(tick, 1000);
+  }
 
   function readFileAsText(file) {
     return new Promise((resolve, reject) => {
@@ -220,10 +339,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   resetBtn.addEventListener('click', () => {
+    if (pollTimer) clearInterval(pollTimer);
     form.reset();
     selectedFiles = [];
     updateFileListUI();
     resultArea.classList.add('hidden');
+    progressArea.classList.add('hidden');
+    extractionInfo.classList.add('hidden');
     errorArea.classList.add('hidden');
     fileInput.value = '';
     

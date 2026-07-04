@@ -9,6 +9,7 @@ const {
   isWellFormedXml
 } = require('../utils/xmlUtils');
 const logger = require('../utils/logger');
+const { NULL_REPORTER } = require('../utils/progress');
 const rules = require('./rules/productRules');
 
 /**
@@ -216,7 +217,7 @@ function updateTagContent(productBlock, tagName, lang, otherAttrs, newContent) {
   });
 }
 
-async function processProductBlock(productBlock, cloneLangs, provider) {
+async function processProductBlock(productBlock, cloneLangs, provider, report = NULL_REPORTER) {
   const xDefaultRegex = /<([a-zA-Z0-9:-]+)(\s+[^>]*?xml:lang=["']x-default["'][^>]*?)>([\s\S]*?)<\/([a-zA-Z0-9:-]+)>/g;
 
   let match;
@@ -253,6 +254,7 @@ async function processProductBlock(productBlock, cloneLangs, provider) {
     // CDATA output (e.g. subtitle) may wrap the source; translate the inner text.
     const srcText = cdata ? stripCData(content) : content;
     if (typeof srcText !== 'string' || srcText.trim() === '') {
+      report.addSkipped(1); // empty source
       continue; // skip empty source
     }
 
@@ -275,12 +277,15 @@ async function processProductBlock(productBlock, cloneLangs, provider) {
     }
 
     const langsToTranslate = [...langsToCreate, ...langsToOverwrite];
+    // Locales that already hold a genuine translation are preserved (skipped).
+    report.addSkipped(cloneLangs.length - langsToTranslate.length);
     if (langsToTranslate.length === 0) {
       continue;
     }
 
     const langResults = await Promise.all(
       langsToTranslate.map(async (lang) => {
+        report.setLocale(lang);
         let translatedContent;
         if (html) {
           const rawContent = await provider.translateHtmlContent(srcText, lang);
@@ -292,6 +297,7 @@ async function processProductBlock(productBlock, cloneLangs, provider) {
       })
     );
     const translatedByLang = new Map(langResults.map(({ lang, translatedContent }) => [lang, translatedContent]));
+    report.addTranslated(langsToTranslate.length);
 
     // Overwrite existing English-fallback tags in place (never x-default, which
     // is not a target locale). This changes only the tag's content, so the
@@ -340,6 +346,7 @@ async function translateXml(xml, options = {}) {
   if (!provider) {
     throw new Error('productXmlTranslator.translateXml requires options.provider');
   }
+  const report = options.reporter || NULL_REPORTER;
   const cloneLangs =
     options.targetLanguages && options.targetLanguages.length > 0
       ? options.targetLanguages
@@ -355,8 +362,11 @@ async function translateXml(xml, options = {}) {
   let lastIdx = 0;
   let resultXml = '';
   for (const matchInfo of productMatches) {
+    const idMatch = /<product\b[^>]*\bproduct-id="([^"]*)"/.exec(matchInfo.fullMatch);
+    report.setComponent(idMatch ? `product (${idMatch[1]})` : 'product');
     resultXml += xml.slice(lastIdx, matchInfo.index);
-    resultXml += await processProductBlock(matchInfo.fullMatch, cloneLangs, provider);
+    resultXml += await processProductBlock(matchInfo.fullMatch, cloneLangs, provider, report);
+    report.tickUnit();
     lastIdx = matchInfo.index + matchInfo.fullMatch.length;
   }
   resultXml += xml.slice(lastIdx);

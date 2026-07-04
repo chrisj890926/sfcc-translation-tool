@@ -1,8 +1,9 @@
 'use strict';
 
 const { deepClone, tryParse } = require('../utils/jsonUtils');
-const { encodeHtmlEntities, decodeXmlEntities, indentBlock, isWellFormedXml } = require('../utils/xmlUtils');
+const { encodeHtmlEntities, decodeXmlEntities, isWellFormedXml, escapeRegExp } = require('../utils/xmlUtils');
 const logger = require('../utils/logger');
+const { NULL_REPORTER } = require('../utils/progress');
 const rules = require('./rules/pageDesignerRules');
 
 /**
@@ -19,6 +20,14 @@ const HTML_KEYS = new Set(rules.htmlKeys);
 
 function normalizeType(typeValue) {
   return String(typeValue || '').trim().toLowerCase();
+}
+
+/** Human-readable label for a <content> block: "type (content-id)". */
+function componentLabel(openTag, typeValue) {
+  const m = /content-id="([^"]*)"/.exec(openTag || '');
+  const id = m ? m[1] : '';
+  const type = typeValue || 'content';
+  return id ? `${type} (${id})` : type;
 }
 
 const SKIP_TYPES = new Set(rules.skipTypes.map(normalizeType));
@@ -133,6 +142,7 @@ async function translateXml(xml, options = {}) {
   if (!provider) {
     throw new Error('pageDesignerXmlTranslator.translateXml requires options.provider');
   }
+  const report = options.reporter || NULL_REPORTER;
   const cloneLangs =
     options.targetLanguages && options.targetLanguages.length > 0
       ? options.targetLanguages
@@ -165,12 +175,17 @@ async function translateXml(xml, options = {}) {
     }
 
     const typeValue = typeMatch[1].trim();
+    report.setComponent(componentLabel(openTagMatch[0], typeValue));
     if (SKIP_TYPES.has(normalizeType(typeValue))) {
       skippedByType += 1;
+      report.addSkipped(1);
+      report.tickUnit();
       continue;
     }
     if (!xDefaultDataMatch) {
       skippedWithoutXDefault += 1;
+      report.addSkipped(1);
+      report.tickUnit();
       continue;
     }
 
@@ -179,6 +194,8 @@ async function translateXml(xml, options = {}) {
     const xDefaultJsonMatch = xDefaultDataTag.match(/<data\b[^>]*>([\s\S]*?)<\/data>/);
     if (!xDefaultJsonMatch) {
       skippedWithoutXDefault += 1;
+      report.addSkipped(1);
+      report.tickUnit();
       continue;
     }
 
@@ -189,15 +206,16 @@ async function translateXml(xml, options = {}) {
     if (!parsedXDefault.ok) {
       // Keep the original content block verbatim rather than dropping it.
       logger.warn(`[Validation] Invalid JSON in x-default data for type '${typeValue}' — keeping original block.`);
-      resultContentBlocks.push(indentBlock(block, 2));
+      resultContentBlocks.push(`    ${block}`);
+      report.addSkipped(1);
+      report.tickUnit();
       continue;
     }
     const xDefaultObj = parsedXDefault.value;
 
-    const dataTags = [xDefaultDataTag];
-
     const langResults = await Promise.all(
       cloneLangs.map(async (lang) => {
+        report.setLocale(lang);
         const langObj = deepClone(xDefaultObj);
         await translateFieldsRecursively(xDefaultObj, langObj, lang, provider);
 
@@ -229,18 +247,34 @@ async function translateXml(xml, options = {}) {
       })
     );
 
+    const newDataTags = [];
     for (const tag of langResults) {
-      if (tag) dataTags.push(tag);
+      if (tag) newDataTags.push(tag);
     }
+    report.addTranslated(newDataTags.length);
+    report.addFailed(langResults.length - newDataTags.length);
+    report.tickUnit();
 
-    const contentOut = [
-      `  ${openTag}`,
-      `    <type>${typeValue}</type>`,
-      ...dataTags.map((tag) => indentBlock(tag, 4)),
-      '  </content>'
-    ].join('\n');
-
-    resultContentBlocks.push(contentOut);
+    // Preserve the ENTIRE original <content> block — display-name, config,
+    // visibility-mode, content-links, folder-links, content-object-assignments
+    // and any non-target-language <data>. We only regenerate the target-language
+    // <data> tags from x-default: drop existing ones for those locales, then
+    // insert the fresh translations right after the x-default <data> tag.
+    let blockOut = block;
+    for (const lang of cloneLangs) {
+      const existingRe = new RegExp(
+        `\\n[ \\t]*<data\\b[^>]*xml:lang="${escapeRegExp(lang)}"[^>]*>[\\s\\S]*?</data>`,
+        'g'
+      );
+      blockOut = blockOut.replace(existingRe, '');
+    }
+    if (newDataTags.length > 0) {
+      const inserted = newDataTags.map((tag) => `        ${tag}`).join('\n');
+      // Replacement passed as a function so any `$` in the JSON is treated literally.
+      blockOut = blockOut.replace(xDefaultDataTag, () => `${xDefaultDataTag}\n${inserted}`);
+    }
+    // Restore the block's original 4-space indentation under <library>.
+    resultContentBlocks.push(`    ${blockOut}`);
   }
 
   const outputXml = [

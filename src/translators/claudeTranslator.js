@@ -173,6 +173,13 @@ class ClaudeTranslator extends TranslationProvider {
       system,
       messages: [{ role: 'user', content: user }]
     });
+    // Report token usage to an attached job (if any). Purely observational —
+    // does not affect the request or the translation output.
+    if (this.reporter && resp && resp.usage) {
+      const u = resp.usage;
+      const inTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      this.reporter.addUsage(inTok, u.output_tokens || 0);
+    }
     const text = (resp.content || [])
       .filter((block) => block.type === 'text')
       .map((block) => block.text)

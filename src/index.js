@@ -47,7 +47,11 @@ function normalizeMode(value) {
  */
 async function translate(xml, options = {}) {
   const mode = normalizeMode(options.mode) || detectXmlType(xml);
-  const opts = { targetLanguages: options.targetLanguages, provider: options.provider };
+  const opts = {
+    targetLanguages: options.targetLanguages,
+    provider: options.provider,
+    reporter: options.reporter
+  };
   if (mode === 'product') {
     return productXmlTranslator.translateXml(xml, opts);
   }

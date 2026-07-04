@@ -8,6 +8,32 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <style>
+    .progress-area { margin-top: 1.5rem; }
+    .progress-area h3 { margin: 0 0 0.75rem; }
+    .progress-bar-track {
+      width: 100%; height: 14px; border-radius: 8px;
+      background: rgba(255, 255, 255, 0.25);
+      overflow: hidden; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.15);
+    }
+    .progress-bar-fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #4f8cff, #7b5cff);
+      border-radius: 8px; transition: width 0.4s ease;
+    }
+    .progress-meta { display: flex; justify-content: space-between; align-items: baseline; margin-top: 0.4rem; }
+    .progress-phase { font-weight: 600; }
+    .progress-pct { font-variant-numeric: tabular-nums; opacity: 0.85; }
+    .progress-current { margin-top: 0.6rem; font-size: 0.9rem; opacity: 0.9; min-height: 1.2em; }
+    .progress-current .lbl { opacity: 0.6; }
+    .progress-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 0.6rem 1rem; margin-top: 1rem;
+    }
+    .stat { background: rgba(255, 255, 255, 0.18); border-radius: 10px; padding: 0.55rem 0.7rem; }
+    .stat .stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.65; }
+    .stat .stat-value { font-size: 1.05rem; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 0.15rem; word-break: break-word; }
+  </style>
 </head>
 <body>
   <div class="background-elements">
@@ -48,6 +74,16 @@
         <div id="fileList" class="file-list hidden"></div>
       </div>
 
+      <div class="form-group" id="productIdsGroup">
+        <label for="productIds">Product IDs to extract <span style="opacity:.6;font-weight:400">(optional)</span></label>
+        <input type="text" id="productIds" name="productIds" class="glass-input" placeholder="e.g. elite130, gx-iii-gold-850, masterliquid-pro-120-non-sleeve">
+        <p id="productIdsHelp" style="font-size:.8rem;opacity:.65;margin:.4rem 0 0">
+          Upload a full export and enter one or more product ids (comma-separated). Before translating, the server
+          extracts only the requested products — a full Page Designer library or Product catalog is reduced to just
+          those items. Leave blank to translate the uploaded file as-is.
+        </p>
+      </div>
+
       <div class="form-group">
         <label>3. Select Target Languages</label>
         <div class="checkbox-grid">
@@ -76,6 +112,34 @@
         <span class="spinner hidden"></span>
       </button>
     </form>
+
+    <div id="progressArea" class="progress-area hidden">
+      <h3>Translating…</h3>
+      <div class="progress-bar-track">
+        <div id="progressBarFill" class="progress-bar-fill"></div>
+      </div>
+      <div class="progress-meta">
+        <span id="progressPhase" class="progress-phase">Starting…</span>
+        <span id="progressPct" class="progress-pct">0%</span>
+      </div>
+      <div class="progress-current">
+        <span class="lbl">Component:</span> <span id="progressComponent">—</span>
+        &nbsp;·&nbsp; <span class="lbl">Locale:</span> <span id="progressLocale">—</span>
+      </div>
+      <div id="extractionInfo" class="progress-current hidden"></div>
+      <div class="progress-grid">
+        <div class="stat"><div class="stat-label">Translated</div><div id="statTranslated" class="stat-value">0</div></div>
+        <div class="stat"><div class="stat-label">Skipped</div><div id="statSkipped" class="stat-value">0</div></div>
+        <div class="stat"><div class="stat-label">Failed</div><div id="statFailed" class="stat-value">0</div></div>
+        <div class="stat"><div class="stat-label">Elapsed</div><div id="statElapsed" class="stat-value">0s</div></div>
+        <div class="stat"><div class="stat-label">Est. Remaining</div><div id="statRemaining" class="stat-value">—</div></div>
+        <div class="stat"><div class="stat-label">Provider</div><div id="statProvider" class="stat-value">—</div></div>
+        <div class="stat"><div class="stat-label">Model</div><div id="statModel" class="stat-value">—</div></div>
+        <div class="stat"><div class="stat-label">Input Tokens</div><div id="statInputTokens" class="stat-value">0</div></div>
+        <div class="stat"><div class="stat-label">Output Tokens</div><div id="statOutputTokens" class="stat-value">0</div></div>
+        <div class="stat"><div class="stat-label">Est. Cost (USD)</div><div id="statCost" class="stat-value">$0.0000</div></div>
+      </div>
+    </div>
 
     <div id="resultArea" class="result-area hidden">
       <h3>Translation Complete!</h3>
