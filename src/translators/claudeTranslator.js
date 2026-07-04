@@ -5,20 +5,30 @@ const logger = require('../utils/logger');
 
 /**
  * ClaudeTranslator — translates values via the Anthropic Claude API using the
- * official @anthropic-ai/sdk. Not the default provider; opt in with
- * TRANSLATION_PROVIDER=claude (and set ANTHROPIC_API_KEY).
+ * official @anthropic-ai/sdk. Opt in with TRANSLATION_PROVIDER=claude (and set
+ * ANTHROPIC_API_KEY). The SDK is loaded lazily so the app still runs with the
+ * Google provider even when @anthropic-ai/sdk is not installed.
  *
- * The SDK is loaded lazily so the app still runs with the Google provider even
- * when @anthropic-ai/sdk is not installed.
- *
- * NOTE (phase 1): this provider is scaffolded and wired but not yet exercised
- * end-to-end. Phase 2 hardens the prompt, batching and validation.
+ * Batching (Phase 3):
+ * The base translator calls _translateRawBatch once per (text, locale) as the
+ * SFCC translators walk each field. Those calls arrive concurrently — the same
+ * source text for several target locales at once. This provider coalesces them
+ * into a short time window and issues a single request per window that carries
+ * MULTIPLE texts, each with its set of target locales, and gets back structured
+ * JSON keyed by id -> locale -> translation. This collapses ~N calls (N = target
+ * languages) into one and packs many texts per request.
  */
 class ClaudeTranslator extends TranslationProvider {
   constructor(options = {}) {
     super(options);
     this.model = options.model || process.env.CLAUDE_MODEL || 'claude-opus-4-8';
+    // Coalescing knobs (overridable for tests).
+    this.flushMs = options.flushMs != null ? options.flushMs : 20;
+    this.maxBatchTexts = options.maxBatchTexts || 40; // max distinct texts per request
+    this.maxBatchChars = options.maxBatchChars || 8000; // source-char budget per request
     this._client = null;
+    this._queue = []; // { text, locale, done(translated) }
+    this._timer = null;
   }
 
   _getClient() {
@@ -37,54 +47,137 @@ class ClaudeTranslator extends TranslationProvider {
     return this._client;
   }
 
+  /**
+   * Called by the base translator with already protected items for ONE locale.
+   * Instead of issuing an API request here, we enqueue each item and let the
+   * coalescing flush batch it with other concurrent requests.
+   */
   async _translateRawBatch(items, targetLocale) {
+    const result = {};
+    await Promise.all(
+      items.map(
+        (item) =>
+          new Promise((resolve) => {
+            if (typeof item.text !== 'string' || item.text.trim() === '') {
+              result[item.id] = item.text;
+              return resolve();
+            }
+            this._queue.push({
+              text: item.text,
+              locale: targetLocale,
+              done: (translated) => {
+                result[item.id] = translated;
+                resolve();
+              }
+            });
+            this._scheduleFlush();
+          })
+      )
+    );
+    return result;
+  }
+
+  _scheduleFlush() {
+    if (this._timer) return;
+    this._timer = setTimeout(() => {
+      this._timer = null;
+      this._flush().catch((error) => logger.warn(`[Claude] flush error: ${error.message}`));
+    }, this.flushMs);
+  }
+
+  async _flush() {
+    if (this._queue.length === 0) return;
+    const batch = this._queue.splice(0, this._queue.length);
+
+    // Group entries by source text -> { id, text, locales, entries }.
+    const byText = new Map();
+    for (const entry of batch) {
+      let group = byText.get(entry.text);
+      if (!group) {
+        group = { id: `t${byText.size}`, text: entry.text, locales: new Set(), entries: [] };
+        byText.set(entry.text, group);
+      }
+      group.locales.add(entry.locale);
+      group.entries.push(entry);
+    }
+    const groups = [...byText.values()];
+
+    // Chunk groups to bound request/response size.
+    const chunks = [];
+    let current = [];
+    let currentChars = 0;
+    for (const group of groups) {
+      const groupChars = group.text.length * group.locales.size;
+      if (current.length > 0 && (current.length >= this.maxBatchTexts || currentChars + groupChars > this.maxBatchChars)) {
+        chunks.push(current);
+        current = [];
+        currentChars = 0;
+      }
+      current.push(group);
+      currentChars += groupChars;
+    }
+    if (current.length > 0) chunks.push(current);
+
+    await Promise.all(
+      chunks.map(async (chunk) => {
+        let map = {};
+        try {
+          map = await this._requestBatch(chunk);
+        } catch (error) {
+          logger.warn(`[Claude Translation Failed] ${error.message}`);
+          map = {};
+        }
+        for (const group of chunk) {
+          const perLocale = (map && map[group.id]) || {};
+          for (const entry of group.entries) {
+            const translated = perLocale[entry.locale];
+            // On any miss, keep the original (protected) text — never break content.
+            entry.done(translated != null ? translated : entry.text);
+          }
+        }
+      })
+    );
+  }
+
+  /**
+   * One API request for a chunk of groups.
+   * @param {Array<{id,text,locales:Set}>} chunk
+   * @returns {Promise<Object>} { [id]: { [locale]: translation } }
+   */
+  async _requestBatch(chunk) {
     const client = this._getClient();
-    const payload = items.map((item) => ({
-      id: item.id,
-      text: item.text,
-      context: item.context || ''
+    const payload = chunk.map((group) => ({
+      id: group.id,
+      text: group.text,
+      locales: [...group.locales]
     }));
 
-    const system = [
-      `You are a professional localization engine translating Salesforce Commerce Cloud e-commerce content into ${targetLocale}.`,
-      'Rules:',
-      '- Return ONLY a JSON object mapping each item id to its translated string. No explanation, no markdown, no code fences.',
-      '- Preserve every placeholder token exactly as-is (e.g. __TERM_0__). Never translate, reorder, split or alter placeholders.',
-      '- Preserve all HTML tags and HTML entities exactly.',
-      '- Do NOT translate product model names, technical abbreviations, SKUs, product ids or URLs.',
-      '- Translate only natural-language text.'
-    ].join('\n');
-
+    const system = SYSTEM_PROMPT;
     const user = [
-      `Translate the "text" of each item into ${targetLocale}.`,
-      'Return a JSON object of the form {"<id>":"<translation>"} with one entry per item.',
+      'Translate each item\'s "text" into every locale listed in its "locales".',
+      'Return ONLY a JSON object of the exact shape:',
+      '{"<id>": {"<locale>": "<translation>", ...}, ...}',
+      'One entry per id, one key per requested locale. No prose, no markdown, no code fences.',
       '',
+      'ITEMS:',
       JSON.stringify(payload)
     ].join('\n');
 
-    let responseText = '';
-    try {
-      const resp = await client.messages.create({
-        model: this.model,
-        max_tokens: 8192,
-        system,
-        messages: [{ role: 'user', content: user }]
-      });
-      responseText = (resp.content || [])
-        .filter((block) => block.type === 'text')
-        .map((block) => block.text)
-        .join('');
-    } catch (error) {
-      logger.warn(`[Claude Translation Failed] targetLang=${targetLocale}: ${error.message}`);
-      return {};
-    }
+    // Budget output tokens by total source size across locales (chunk is bounded).
+    const srcChars = chunk.reduce((sum, g) => sum + g.text.length * g.locales.size, 0);
+    const maxTokens = Math.min(16000, Math.max(1024, Math.ceil(srcChars * 2)));
 
-    const parsed = this._parseJson(responseText);
-    const out = {};
-    for (const item of items) {
-      out[item.id] = parsed && parsed[item.id] != null ? parsed[item.id] : item.text;
-    }
-    return out;
+    const resp = await client.messages.create({
+      model: this.model,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: 'user', content: user }]
+    });
+    const text = (resp.content || [])
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('');
+    return this._parseJson(text) || {};
   }
 
   _parseJson(str) {
@@ -103,5 +196,26 @@ class ClaudeTranslator extends TranslationProvider {
     }
   }
 }
+
+const SYSTEM_PROMPT = [
+  'You are the official Cooler Master localization engine. You translate e-commerce',
+  'content (Salesforce Commerce Cloud product and Page Designer data) into the',
+  'requested locales with the accuracy and brand voice of a professional in-house',
+  'localization team.',
+  '',
+  'Absolute rules — follow every one:',
+  '- Output ONLY a JSON object. No explanation, no markdown, no code fences, no trailing text.',
+  '- Preserve every placeholder token EXACTLY as-is (e.g. __TERM_0__, __TERM_1__). Never translate,',
+  '  reorder, renumber, split, merge or add spaces inside placeholders.',
+  '- Preserve all HTML tags and attributes exactly (e.g. <p>, <br>, <strong>, <a href="...">).',
+  '  Translate only the human-readable text between tags.',
+  '- Preserve HTML entities exactly (e.g. &lt; &gt; &amp; &quot;).',
+  '- Preserve any CDATA content structure; translate only the readable text inside it.',
+  '- Never modify URLs, file paths, email addresses, product model names, SKUs, product ids,',
+  '  or technical abbreviations/standards (e.g. ATX, PCIe, SATA, PSU, 80 PLUS, RTX, MTBF).',
+  '- Keep numbers, units and measurements unchanged (e.g. 120mm, 12 V DC, 0.3 A, 250-1370 rpm).',
+  '- Translate only genuine natural-language text. If a value has nothing to translate, return it unchanged.',
+  '- Produce fluent, native, brand-appropriate translations — not literal word-for-word output.'
+].join('\n');
 
 module.exports = { ClaudeTranslator };

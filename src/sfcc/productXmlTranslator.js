@@ -25,6 +25,122 @@ const HTML_TAGS = new Set(rules.htmlTags);
 // Translatable <custom-attribute attribute-id="..."> configs, keyed by id.
 const CUSTOM_ATTR_MAP = new Map((rules.customAttributes || []).map((c) => [c.id, c]));
 
+// ---------------------------------------------------------------------------
+// English-fallback detection.
+//
+// A real SFCC catalog export ships EVERY configured locale, but locales that
+// were never translated in Business Manager are pre-filled with the English
+// fallback text. The old rule ("skip any locale that already exists") therefore
+// preserved that English forever. Instead we decide per locale whether the
+// existing value is an untranslated fallback (overwrite it) or a genuine
+// localization (leave it alone).
+// ---------------------------------------------------------------------------
+
+// Scripts whose presence proves a value is genuinely localized (non-Latin locales).
+const SCRIPT_RANGES = {
+  ja: /[぀-ヿ㐀-䶿一-鿿]/, // Hiragana, Katakana, CJK
+  ko: /[가-힣ᄀ-ᇿ㄰-㆏]/, // Hangul
+  zh: /[㐀-䶿一-鿿]/ // CJK
+};
+
+// Strong English function words — used to spot English text in a Latin-script slot.
+const EN_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'is', 'are', 'of', 'to', 'this', 'that',
+  'these', 'those', 'from', 'your', 'you', 'will', 'can', 'has', 'have',
+  'our', 'we', 'its', 'an', 'a'
+]);
+
+// Per-locale signals (diacritics + common function words) that mark real localization.
+const LOCALE_SIGNALS = {
+  de: {
+    re: /[äöüß]/i,
+    words: new Set(['und', 'oder', 'der', 'die', 'das', 'den', 'dem', 'ein', 'eine', 'einer', 'für', 'mit', 'ist', 'sind', 'nicht', 'auch', 'bei', 'zur', 'zum', 'von', 'im', 'als', 'sich', 'wird', 'werden', 'kann', 'jahre', 'sicher', 'zuverlässig', 'wahl', 'netzteil'])
+  },
+  fr: {
+    re: /[àâçéèêëîïôûùüÿœæ]/i,
+    words: new Set(['le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'et', 'ou', 'pour', 'avec', 'est', 'sont', 'dans', 'sur', 'par', 'que', 'qui', 'ce', 'cette', 'aux', 'au', 'plus', 'fiable', 'choix', 'garantie'])
+  },
+  es: {
+    re: /[áéíóúñü¿¡]/i,
+    words: new Set(['el', 'la', 'los', 'las', 'un', 'una', 'del', 'de', 'y', 'o', 'para', 'con', 'es', 'son', 'en', 'por', 'que', 'se', 'su', 'más', 'opción', 'fuente', 'confiable'])
+  },
+  it: {
+    re: /[àèéìíîòóùú]/i,
+    words: new Set(['il', 'lo', 'la', 'gli', 'le', 'un', 'uno', 'una', 'del', 'della', 'di', 'e', 'o', 'per', 'con', 'è', 'sono', 'in', 'che', 'si', 'più', 'scelta'])
+  },
+  nl: {
+    re: /[ëïéèü]/i,
+    words: new Set(['de', 'het', 'een', 'en', 'of', 'voor', 'met', 'is', 'van', 'op', 'die', 'dat', 'niet', 'ook', 'zijn', 'wordt', 'kan', 'keuze'])
+  },
+  pt: {
+    re: /[ãõáâàéêíóôúç]/i,
+    words: new Set(['o', 'a', 'os', 'as', 'um', 'uma', 'do', 'da', 'de', 'e', 'ou', 'para', 'com', 'é', 'são', 'em', 'que', 'se', 'mais', 'opção', 'fonte'])
+  }
+};
+
+/** Reduce a tag's raw inner value to comparable plain text (no CDATA/HTML/entities). */
+function toPlainText(raw) {
+  if (typeof raw !== 'string') return '';
+  let t = stripCData(raw);
+  t = t.replace(/<[^>]+>/g, ' '); // drop HTML tags
+  t = t
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&');
+  return t.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * True if `text` reads as a genuine localization for `lang`:
+ * non-Latin locales must contain their script; Latin locales must show
+ * language-specific diacritics or function words (and not read as English).
+ */
+function looksLocalized(text, lang) {
+  const base = String(lang).toLowerCase().split(/[-_]/)[0];
+
+  const script = SCRIPT_RANGES[base];
+  if (script) {
+    return script.test(text);
+  }
+
+  const sig = LOCALE_SIGNALS[base];
+  const words = (text.toLowerCase().match(/[a-zà-ÿœæ]+/gi) || []);
+  if (sig) {
+    if (sig.re.test(text)) return true; // locale-specific diacritics present
+    let loc = 0;
+    let en = 0;
+    for (const w of words) {
+      if (sig.words.has(w)) loc += 1;
+      if (EN_WORDS.has(w)) en += 1;
+    }
+    if (loc > 0 && loc >= en) return true; // clearly the target language
+    if (en > loc) return false; // clearly English
+  }
+
+  // Unknown Latin locale, or no decisive signal: treat non-ASCII (diacritics)
+  // as localized and pure-ASCII text as an English fallback.
+  return /[^\x00-\x7f]/.test(text);
+}
+
+/**
+ * Decide whether an EXISTING target-locale value is an untranslated English
+ * fallback that should be overwritten.
+ *   - empty                                    -> overwrite (needs content)
+ *   - identical (case-insensitive) to x-default -> overwrite (mirrored fallback)
+ *   - does not read as a genuine localization   -> overwrite (English fallback)
+ *   - otherwise                                 -> preserve (real translation)
+ */
+function isEnglishFallback(existingRaw, srcRaw, lang) {
+  const existing = toPlainText(existingRaw);
+  if (existing === '') return true;
+  const src = toPlainText(srcRaw);
+  if (existing.toLowerCase() === src.toLowerCase()) return true;
+  return !looksLocalized(existing, lang);
+}
+
 /**
  * Guarantee that within each <page-attributes> block every <page-title> is
  * serialized before every <page-description> (never interleaved). Only blocks
@@ -57,7 +173,11 @@ function reorderPageAttributes(xml) {
   });
 }
 
-function checkTagExists(productBlock, tagName, lang, otherAttrs) {
+/**
+ * Return the raw inner content of an existing <tag xml:lang="lang"> that also
+ * matches every attribute in otherAttrs, or null if no such tag exists.
+ */
+function findExistingTagContent(productBlock, tagName, lang, otherAttrs) {
   const tagRegex = new RegExp(`<${tagName}(\\s+[^>]*?)>([\\s\\S]*?)</${tagName}>`, 'g');
   let match;
   while ((match = tagRegex.exec(productBlock)) !== null) {
@@ -70,10 +190,10 @@ function checkTagExists(productBlock, tagName, lang, otherAttrs) {
           break;
         }
       }
-      if (allMatch) return true;
+      if (allMatch) return match[2];
     }
   }
-  return false;
+  return null;
 }
 
 function updateTagContent(productBlock, tagName, lang, otherAttrs, newContent) {
@@ -139,8 +259,28 @@ async function processProductBlock(productBlock, cloneLangs, provider) {
     const otherAttrs = parseAttributes(attrStr);
     delete otherAttrs['xml:lang'];
 
+    // Classify each target locale:
+    //   - missing            -> create a new translated tag
+    //   - English fallback    -> overwrite the existing tag with a translation
+    //   - genuine translation -> preserve (never translated, never overwritten)
+    const langsToCreate = [];
+    const langsToOverwrite = [];
+    for (const lang of cloneLangs) {
+      const existing = findExistingTagContent(productBlock, tagName, lang, otherAttrs);
+      if (existing === null) {
+        langsToCreate.push(lang);
+      } else if (isEnglishFallback(existing, srcText, lang)) {
+        langsToOverwrite.push(lang);
+      }
+    }
+
+    const langsToTranslate = [...langsToCreate, ...langsToOverwrite];
+    if (langsToTranslate.length === 0) {
+      continue;
+    }
+
     const langResults = await Promise.all(
-      cloneLangs.map(async (lang) => {
+      langsToTranslate.map(async (lang) => {
         let translatedContent;
         if (html) {
           const rawContent = await provider.translateHtmlContent(srcText, lang);
@@ -151,16 +291,18 @@ async function processProductBlock(productBlock, cloneLangs, provider) {
         return { lang, translatedContent };
       })
     );
+    const translatedByLang = new Map(langResults.map(({ lang, translatedContent }) => [lang, translatedContent]));
 
-    const newTagsToInsert = [];
-    for (const { lang, translatedContent } of langResults) {
-      // Do not overwrite an existing non-empty target translation.
-      if (checkTagExists(productBlock, tagName, lang, otherAttrs)) {
-        continue;
-      }
-      const newAttrStr = buildAttrStr(lang, otherAttrs);
-      newTagsToInsert.push(`<${tagName}${newAttrStr}>${translatedContent}</${tagName}>`);
+    // Overwrite existing English-fallback tags in place (never x-default, which
+    // is not a target locale). This changes only the tag's content, so the
+    // x-default insertion anchor below stays valid.
+    for (const lang of langsToOverwrite) {
+      productBlock = updateTagContent(productBlock, tagName, lang, otherAttrs, translatedByLang.get(lang));
     }
+
+    const newTagsToInsert = langsToCreate.map(
+      (lang) => `<${tagName}${buildAttrStr(lang, otherAttrs)}>${translatedByLang.get(lang)}</${tagName}>`
+    );
 
     if (newTagsToInsert.length > 0) {
       const tagIndex = productBlock.lastIndexOf(fullMatch);

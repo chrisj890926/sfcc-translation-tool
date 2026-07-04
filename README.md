@@ -94,6 +94,32 @@ root element.
 
 ---
 
+## Multi-file upload — limitations
+
+Multiple files can be uploaded in one batch, but note the current behavior and its
+constraints:
+
+- **Same XML type only.** The mode selector applies to the whole batch. Do **not**
+  mix Product XML and Page Designer XML in a single upload — the wrong-type files
+  will fail or produce incorrect output.
+- **Same `catalog-id` / `library-id`.** Files should belong to the same catalog
+  (Product) or library (Page Designer). On merge, the XML declaration and the
+  `<catalog>` / `<library>` wrapper are taken from the **first** file, so mixing
+  different catalogs/libraries mis-attributes the merged content.
+- **Output is a single merged XML file.** All `<product>` (Product) or `<content>`
+  (Page Designer) blocks from every file are combined into one document
+  (`merged-translated.xml` / `merged-xdefault-cloned.xml`). Per-file output is not
+  produced; duplicate `content-id` / `product-id` across files are not de-duplicated.
+- **Large batches may hit timeouts or translation rate limits.** The batch is
+  processed within a single request and translation uses the free Google endpoint
+  (capped concurrency). Many or large files can exceed request/proxy timeouts or
+  trigger rate limiting (more likely on shared hosting such as Railway). On any
+  translation failure the original text is kept.
+
+For independent per-file results, or to mix types, upload files one batch at a time.
+
+---
+
 ## Product XML — supported fields
 
 Source language priority: `x-default`, then `default` / `en-US`.

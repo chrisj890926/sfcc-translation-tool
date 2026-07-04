@@ -144,6 +144,108 @@ function dataJson(xml, lang) {
   }
 
   // ============================================================
+  console.log('\nProduct XML — fallback overwrite (create / overwrite / preserve)');
+  // ============================================================
+  {
+    // One product exercising all three outcomes across all four fields:
+    //   ja-JP short-desc       : English fallback (differs from x-default) -> overwrite
+    //   de-DE short-desc       : genuine German                            -> preserve
+    //   ja-JP page-title       : identical to x-default                    -> overwrite
+    //   ko-KR page-title       : genuine Korean                            -> preserve
+    //   fr-FR page-description : English fallback (differs)                -> overwrite
+    //   ja-JP page-description : genuine Japanese                          -> preserve
+    //   ko-KR subtitle         : identical to x-default                    -> overwrite (CDATA)
+    //   fr-FR subtitle         : genuine French                            -> preserve
+    // Target locales absent for a field (e.g. fr-FR/ko-KR short-desc) are created.
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns="http://www.demandware.com/xml/impex/catalog/2006-10-31" catalog-id="cm">
+  <product product-id="FB1">
+    <short-description xml:lang="x-default">&lt;p&gt;Active PFC Design&lt;/p&gt;</short-description>
+    <short-description xml:lang="ja-JP">&lt;p&gt;Old English blurb about the design&lt;/p&gt;</short-description>
+    <short-description xml:lang="de-DE">&lt;p&gt;Aktives PFC-Design für höchste Zuverlässigkeit und Effizienz&lt;/p&gt;</short-description>
+    <page-attributes>
+      <page-title xml:lang="x-default">Entry Level PSU</page-title>
+      <page-title xml:lang="ja-JP">Entry Level PSU</page-title>
+      <page-title xml:lang="ko-KR">엔트리 레벨 PSU</page-title>
+      <page-description xml:lang="x-default">A dependable choice for entry level users.</page-description>
+      <page-description xml:lang="fr-FR">The unit that was never localized here.</page-description>
+      <page-description xml:lang="ja-JP">信頼できる選択肢です。</page-description>
+    </page-attributes>
+    <custom-attributes>
+      <custom-attribute attribute-id="subtitle" xml:lang="x-default">Quiet Power</custom-attribute>
+      <custom-attribute attribute-id="subtitle" xml:lang="ko-KR">Quiet Power</custom-attribute>
+      <custom-attribute attribute-id="subtitle" xml:lang="fr-FR"><![CDATA[Alimentation silencieuse et fiable]]></custom-attribute>
+    </custom-attributes>
+  </product>
+</catalog>`;
+    const out = await productXml.translateXml(xml, { targetLanguages: LANGS, provider: provider() });
+
+    // Inner content of the (single) <tag ...xml:lang="lang"> element.
+    const content = (tag, lang, extra = '') => {
+      const a = extra ? `${extra} ` : '';
+      const m = out.match(new RegExp(`<${tag} ${a}xml:lang="${lang}">([\\s\\S]*?)</${tag}>`));
+      return m ? m[1] : null;
+    };
+    const tagCount = (tag, lang, extra = '') => {
+      const a = extra ? `${extra} ` : '';
+      return (out.match(new RegExp(`<${tag} ${a}xml:lang="${lang}"`, 'g')) || []).length;
+    };
+
+    // (1) English fallback that differs from x-default -> overwritten with a translation of x-default.
+    ok('short-description ja-JP English fallback overwritten',
+      content('short-description', 'ja-JP') === '&lt;p&gt;[ja-JP] Active PFC Design&lt;/p&gt;',
+      content('short-description', 'ja-JP'));
+    ok('page-description fr-FR English fallback overwritten',
+      content('page-description', 'fr-FR') === '[fr-FR] A dependable choice for entry level users.',
+      content('page-description', 'fr-FR'));
+
+    // (2) Value identical to x-default -> overwritten with a translation.
+    ok('page-title ja-JP (identical to x-default) overwritten',
+      content('page-title', 'ja-JP') === '[ja-JP] Entry Level PSU',
+      content('page-title', 'ja-JP'));
+    ok('subtitle ko-KR (identical to x-default) overwritten as CDATA',
+      content('custom-attribute', 'ko-KR', 'attribute-id="subtitle"') === '<![CDATA[[ko-KR] Quiet Power]]>',
+      content('custom-attribute', 'ko-KR', 'attribute-id="subtitle"'));
+
+    // (3) Genuine localized content -> preserved untouched (no [locale] prefix from the mock).
+    ok('short-description de-DE genuine German preserved',
+      content('short-description', 'de-DE') === '&lt;p&gt;Aktives PFC-Design für höchste Zuverlässigkeit und Effizienz&lt;/p&gt;',
+      content('short-description', 'de-DE'));
+    ok('page-title ko-KR genuine Korean preserved',
+      content('page-title', 'ko-KR') === '엔트리 레벨 PSU', content('page-title', 'ko-KR'));
+    ok('page-description ja-JP genuine Japanese preserved',
+      content('page-description', 'ja-JP') === '信頼できる選択肢です。', content('page-description', 'ja-JP'));
+    ok('subtitle fr-FR genuine French preserved',
+      content('custom-attribute', 'fr-FR', 'attribute-id="subtitle"') === '<![CDATA[Alimentation silencieuse et fiable]]>',
+      content('custom-attribute', 'fr-FR', 'attribute-id="subtitle"'));
+    ok('preserved values never carry the mock [locale] prefix',
+      !/\[de-DE\]/.test(content('short-description', 'de-DE') || '') &&
+      !/\[ko-KR\]/.test(content('page-title', 'ko-KR') || '') &&
+      !/\[ja-JP\]/.test(content('page-description', 'ja-JP') || '') &&
+      !/\[fr-FR\]/.test(content('custom-attribute', 'fr-FR', 'attribute-id="subtitle"') || ''));
+
+    // (4)+(5) All four fields, exactly one tag per target locale (overwrite in place, no duplicates).
+    let noDup = true;
+    const dupDetail = [];
+    for (const lang of LANGS) {
+      for (const tag of ['short-description', 'page-title', 'page-description']) {
+        const c = tagCount(tag, lang);
+        if (c !== 1) { noDup = false; dupDetail.push(`${tag} ${lang}=${c}`); }
+      }
+      const cs = tagCount('custom-attribute', lang, 'attribute-id="subtitle"');
+      if (cs !== 1) { noDup = false; dupDetail.push(`subtitle ${lang}=${cs}`); }
+    }
+    ok('exactly one tag per target locale for all four fields (no duplicates)', noDup, dupDetail.join(', '));
+
+    // Missing target locales are still created + translated (unchanged behavior).
+    ok('missing locale still created & translated',
+      content('short-description', 'fr-FR') === '&lt;p&gt;[fr-FR] Active PFC Design&lt;/p&gt;',
+      content('short-description', 'fr-FR'));
+
+    ok('fallback-overwrite output well-formed XML', isWellFormedXml(out));
+  }
+
+  // ============================================================
   console.log('\nPage Designer XML — cmDownloadFiles');
   // ============================================================
   {
