@@ -3,6 +3,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const engine = require('./index');
 const logger = require('./utils/logger');
 const { createJob, getJob, toStatus } = require('./jobs/jobStore');
@@ -10,6 +11,67 @@ const { runJob } = require('./jobs/runner');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+
+// Cost safety guard: without Product IDs the whole file is translated. Block
+// uploads that look like a full catalog / library (many products / content
+// blocks) so nobody accidentally translates the entire export.
+const MAX_PRODUCTS_WITHOUT_IDS = 50;
+const MAX_CONTENT_WITHOUT_IDS = 200;
+const COST_GUARD_MESSAGE =
+  'Product IDs is required for large full-catalog/library uploads to prevent accidental high API cost.';
+
+/** Count actual product / content nodes across the uploaded files. */
+function countNodes(files) {
+  let products = 0;
+  let contents = 0;
+  for (const f of files) {
+    const c = (f && f.content) || '';
+    products += (c.match(/<product product-id="/g) || []).length;
+    contents += (c.match(/<content content-id="/g) || []).length;
+  }
+  return { products, contents };
+}
+
+// ---------------------------------------------------------------------------
+// Optional HTTP Basic Auth.
+//
+// Enabled only when APP_PASSWORD is set (so local development stays open).
+// Username defaults to "admin" if APP_USERNAME is not set. /healthz is always
+// open for platform health checks. Credentials are never logged or echoed.
+// ---------------------------------------------------------------------------
+const AUTH_PASSWORD = process.env.APP_PASSWORD || '';
+const AUTH_USERNAME = process.env.APP_USERNAME || 'admin';
+const AUTH_ENABLED = AUTH_PASSWORD !== '';
+
+/** Constant-time string comparison (guards against timing attacks). */
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a), 'utf8');
+  const bb = Buffer.from(String(b), 'utf8');
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
+/** True if the request may proceed. When auth is disabled, always true. */
+function isAuthorized(req) {
+  if (!AUTH_ENABLED) return true;
+  const header = req.headers.authorization || '';
+  const match = /^Basic\s+(.+)$/i.exec(header);
+  if (!match) return false;
+  let decoded;
+  try {
+    decoded = Buffer.from(match[1], 'base64').toString('utf8');
+  } catch (e) {
+    return false;
+  }
+  const sep = decoded.indexOf(':');
+  if (sep === -1) return false;
+  const user = decoded.slice(0, sep);
+  const pass = decoded.slice(sep + 1);
+  // Evaluate both before AND-ing so a matching username can't be inferred by timing.
+  const okUser = safeEqual(user, AUTH_USERNAME);
+  const okPass = safeEqual(pass, AUTH_PASSWORD);
+  return okUser && okPass;
+}
 
 const MIME_TYPES = {
   '.html': 'text/html',
@@ -89,6 +151,20 @@ function handleTranslate(req, res) {
         return res.end(JSON.stringify({ error: 'No XML content provided.' }));
       }
 
+      // Cost safety guard — no Product IDs means the whole file is translated.
+      if (productIds.length === 0) {
+        const { products, contents } = countNodes(files);
+        if (products > MAX_PRODUCTS_WITHOUT_IDS || contents > MAX_CONTENT_WITHOUT_IDS) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(
+            JSON.stringify({
+              error: COST_GUARD_MESSAGE,
+              detail: `Detected ${products} products / ${contents} content blocks. Enter the Product IDs to extract, or split the file into smaller uploads.`
+            })
+          );
+        }
+      }
+
       const model = provider.model || (providerName === 'claude' ? 'claude-opus-4-8' : 'google');
       const job = createJob({ provider: providerName, model });
 
@@ -135,6 +211,21 @@ function handleJob(req, res, urlPath) {
 const server = http.createServer((req, res) => {
   const urlPath = (req.url || '').split('?')[0];
 
+  // Health check — always open (platform probes), no auth, no secrets.
+  if (req.method === 'GET' && urlPath === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    return res.end('OK');
+  }
+
+  // Basic Auth gate — protects every other route when APP_PASSWORD is set.
+  if (!isAuthorized(req)) {
+    res.writeHead(401, {
+      'WWW-Authenticate': 'Basic realm="SFCC XML Translator", charset="UTF-8"',
+      'Content-Type': 'text/plain'
+    });
+    return res.end('Authentication required.');
+  }
+
   if (req.method === 'POST' && urlPath === '/api/translate') {
     return handleTranslate(req, res);
   }
@@ -150,4 +241,5 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => {
   logger.info(`Server is running at http://localhost:${PORT}`);
+  logger.info(`Basic Auth: ${AUTH_ENABLED ? `enabled (user "${AUTH_USERNAME}")` : 'disabled (set APP_PASSWORD to enable)'}`);
 });

@@ -229,6 +229,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const mode = xmlFormat === 'product-section' ? 'product' : 'page-designer';
     const productIds = (formData.get('productIds') || '').trim();
 
+    // Cost safety guard (mirrors the server). Without Product IDs the whole file
+    // is translated — block clearly full catalog/library uploads before sending.
+    if (!productIds) {
+      let products = 0;
+      let contents = 0;
+      for (const f of fileContents) {
+        products += (f.content.match(/<product product-id="/g) || []).length;
+        contents += (f.content.match(/<content content-id="/g) || []).length;
+      }
+      if (products > 50 || contents > 200) {
+        showError(
+          'Product IDs is required for large full-catalog/library uploads to prevent accidental high API cost. ' +
+            `(Detected ${products} products / ${contents} content blocks — enter Product IDs to extract, or split the file.)`
+        );
+        return;
+      }
+    }
+
     const payload = {
       xmlContents: fileContents,
       targetLanguages,
