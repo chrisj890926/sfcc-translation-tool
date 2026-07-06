@@ -89,6 +89,7 @@ module.exports = {
     'id-ID': 'Unduhan',
     'pt-BR': 'Downloads',
     'th-TH': 'ดาวน์โหลด',
-    'vi-VN': 'Tải xuống'
+    'vi-VN': 'Tải xuống',
+    'zh-TW': '下載'
   }
 };
