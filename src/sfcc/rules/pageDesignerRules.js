@@ -82,6 +82,13 @@ module.exports = {
     'ja-JP': 'ダウンロード',
     'de-DE': 'Downloads',
     'fr-FR': 'Téléchargements',
-    'ko-KR': '다운로드'
+    'ko-KR': '다운로드',
+    'it-IT': 'Download',
+    'nl-NL': 'Downloads',
+    es: 'Descargas',
+    'id-ID': 'Unduhan',
+    'pt-BR': 'Downloads',
+    'th-TH': 'ดาวน์โหลด',
+    'vi-VN': 'Tải xuống'
   }
 };
