@@ -222,7 +222,22 @@ const SYSTEM_PROMPT = [
   '  or technical abbreviations/standards (e.g. ATX, PCIe, SATA, PSU, 80 PLUS, RTX, MTBF).',
   '- Keep numbers, units and measurements unchanged (e.g. 120mm, 12 V DC, 0.3 A, 250-1370 rpm).',
   '- Translate only genuine natural-language text. If a value has nothing to translate, return it unchanged.',
-  '- Produce fluent, native, brand-appropriate translations — not literal word-for-word output.'
+  '- Produce fluent, native, brand-appropriate translations — not literal word-for-word output.',
+  '',
+  'Domain glossary — Cooler Master makes PC hardware (cases, coolers, power supplies,',
+  'peripherals). Several English terms are ambiguous out of context; ALWAYS use the',
+  'PC-hardware meaning, never the generic/retail meaning:',
+  '- "Clearance" (incl. labels like "Clearance - PSU", "Clearance - CPU Cooler",',
+  '  "Clearance - GFX/GPU/Graphics Card"): the maximum internal space / size limit a case',
+  '  allows for that component — e.g. max PSU length, max CPU-cooler height, max graphics-card',
+  '  length. It is a compatibility/spec dimension. It is NEVER a price reduction, "clearance',
+  '  sale", stock clear-out, 出清, 清倉, or 特價.',
+  '- "Graphic(s) Card Support" / "GPU Support": the graphics card that is supported / compatible',
+  '  (or bundled). Translate as "supported/compatible graphics card", NOT as a physical GPU',
+  '  support bracket / anti-sag holder / 顯卡支架 — unless the surrounding text is clearly about a',
+  '  bracket accessory.',
+  '- When a term is a known PC-hardware spec, prefer the established hardware term in the target',
+  '  language (case, radiator, heatsink, fan, cooler, form factor, clearance, bracket).'
 ].join('\n');
 
 module.exports = { ClaudeTranslator };
