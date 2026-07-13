@@ -228,6 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Map the UI format selector to the backend translator mode.
     const mode = xmlFormat === 'product-section' ? 'product' : 'page-designer';
     const productIds = (formData.get('productIds') || '').trim();
+    const force = document.getElementById('forceRetranslate').checked;
 
     // Cost safety guard (mirrors the server). Without Product IDs the whole file
     // is translated — block clearly full catalog/library uploads before sending.
@@ -253,7 +254,8 @@ document.addEventListener('DOMContentLoaded', () => {
       protectedTerms,
       mode,
       xmlFormat, // kept for backward compatibility
-      productIds // comma-separated; server extracts the subtree(s) before translating
+      productIds, // comma-separated; server extracts the subtree(s) before translating
+      force // overwrite existing target-locale values (fixes wrong-language)
     };
 
     // Determine download filename + completion message up front.

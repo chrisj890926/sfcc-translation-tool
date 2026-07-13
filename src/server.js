@@ -137,6 +137,11 @@ function handleTranslate(req, res) {
       }
       productIds = productIds.map((s) => String(s).trim()).filter(Boolean);
 
+      // Force re-translate: overwrite existing target-locale values (Product) from
+      // x-default instead of preserving genuine-looking ones. Page Designer already
+      // regenerates target locales, so this only changes Product behavior.
+      const force = body.force === true || body.force === 'true' || body.force === 'on';
+
       // Share one provider (and its cache) across all files in the request.
       const provider = engine.createProvider(providerName, { protectedTerms });
 
@@ -169,7 +174,7 @@ function handleTranslate(req, res) {
       const job = createJob({ provider: providerName, model });
 
       // Fire-and-forget — the browser tracks progress via the jobs endpoints.
-      runJob(job, { files, mode, targetLanguages, provider, productIds });
+      runJob(job, { files, mode, targetLanguages, provider, productIds, force });
 
       res.writeHead(202, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ jobId: job.id }));

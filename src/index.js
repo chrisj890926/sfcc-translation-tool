@@ -50,7 +50,8 @@ async function translate(xml, options = {}) {
   const opts = {
     targetLanguages: options.targetLanguages,
     provider: options.provider,
-    reporter: options.reporter
+    reporter: options.reporter,
+    force: options.force
   };
   if (mode === 'product') {
     return productXmlTranslator.translateXml(xml, opts);

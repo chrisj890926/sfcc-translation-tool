@@ -82,6 +82,14 @@
           extracts only the requested products — a full Page Designer library or Product catalog is reduced to just
           those items. Leave blank to translate the uploaded file as-is.
         </p>
+        <label style="display:flex;align-items:center;gap:.4rem;margin-top:.6rem;font-size:.9rem">
+          <input type="checkbox" id="forceRetranslate" name="force">
+          Force re-translate (overwrite existing translations)
+        </label>
+        <p style="font-size:.8rem;opacity:.65;margin:.3rem 0 0">
+          Off (default): keep good existing translations, only fill gaps / replace English fallbacks. On: overwrite the
+          selected locales from x-default — use to fix wrong-language or bad values (costs more tokens).
+        </p>
       </div>
 
       <div class="form-group">

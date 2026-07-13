@@ -217,7 +217,7 @@ function updateTagContent(productBlock, tagName, lang, otherAttrs, newContent) {
   });
 }
 
-async function processProductBlock(productBlock, cloneLangs, provider, report = NULL_REPORTER) {
+async function processProductBlock(productBlock, cloneLangs, provider, report = NULL_REPORTER, force = false) {
   const xDefaultRegex = /<([a-zA-Z0-9:-]+)(\s+[^>]*?xml:lang=["']x-default["'][^>]*?)>([\s\S]*?)<\/([a-zA-Z0-9:-]+)>/g;
 
   let match;
@@ -271,7 +271,9 @@ async function processProductBlock(productBlock, cloneLangs, provider, report = 
       const existing = findExistingTagContent(productBlock, tagName, lang, otherAttrs);
       if (existing === null) {
         langsToCreate.push(lang);
-      } else if (isEnglishFallback(existing, srcText, lang)) {
+      } else if (force || isEnglishFallback(existing, srcText, lang)) {
+        // force: overwrite every existing target locale from x-default (fixes
+        // wrong-language / bad values). Otherwise only overwrite English fallbacks.
         langsToOverwrite.push(lang);
       }
     }
@@ -347,6 +349,7 @@ async function translateXml(xml, options = {}) {
     throw new Error('productXmlTranslator.translateXml requires options.provider');
   }
   const report = options.reporter || NULL_REPORTER;
+  const force = !!options.force;
   const cloneLangs =
     options.targetLanguages && options.targetLanguages.length > 0
       ? options.targetLanguages
@@ -365,7 +368,7 @@ async function translateXml(xml, options = {}) {
     const idMatch = /<product\b[^>]*\bproduct-id="([^"]*)"/.exec(matchInfo.fullMatch);
     report.setComponent(idMatch ? `product (${idMatch[1]})` : 'product');
     resultXml += xml.slice(lastIdx, matchInfo.index);
-    resultXml += await processProductBlock(matchInfo.fullMatch, cloneLangs, provider, report);
+    resultXml += await processProductBlock(matchInfo.fullMatch, cloneLangs, provider, report, force);
     report.tickUnit();
     lastIdx = matchInfo.index + matchInfo.fullMatch.length;
   }

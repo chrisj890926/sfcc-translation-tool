@@ -4,7 +4,20 @@ const engine = require('../index');
 const { isWellFormedXml } = require('../utils/xmlUtils');
 const { extractReducedLibrary } = require('../sfcc/pageExtractor');
 const { extractReducedCatalog } = require('../sfcc/catalogExtractor');
+const { toStatus } = require('./jobStore');
 const logger = require('../utils/logger');
+
+/** One-line token/cost summary for the logs (shows up in Railway Logs). */
+function usageLine(job) {
+  const s = toStatus(job);
+  const ex = s.extraction ? ` reduced=${s.extraction.originalContentCount}->${s.extraction.reducedContentCount}` : '';
+  return (
+    `provider=${s.provider} model=${s.model} | ` +
+    `translated=${s.translatedCount} skipped=${s.skippedCount} failed=${s.failedCount} | ` +
+    `tokens in=${s.inputTokens} out=${s.outputTokens} | est cost=$${s.estimatedCost} | ` +
+    `${s.elapsedSeconds}s files=${s.fileCount}${ex}`
+  );
+}
 
 /**
  * Drives a translation job through the progress phases and updates the job's
@@ -21,7 +34,7 @@ function countUnits(xml, mode) {
   return (xml.match(re) || []).length;
 }
 
-async function runJob(job, { files, mode, targetLanguages, provider, productIds }) {
+async function runJob(job, { files, mode, targetLanguages, provider, productIds, force }) {
   try {
     job.status = 'running';
     job.fileCount = files.length;
@@ -104,7 +117,7 @@ async function runJob(job, { files, mode, targetLanguages, provider, productIds 
 
     job.setPhase('Translating');
     const translated = await Promise.all(
-      files2.map((f) => engine.translate(f.content, { mode, targetLanguages, provider, reporter: job }))
+      files2.map((f) => engine.translate(f.content, { mode, targetLanguages, provider, reporter: job, force }))
     );
 
     job.setPhase('Writing XML');
@@ -124,12 +137,12 @@ async function runJob(job, { files, mode, targetLanguages, provider, productIds 
     job.setPhase('Completed');
     job.status = 'completed';
     job.endTime = Date.now();
-    logger.info(`[Job] ${job.id} completed in ${((job.endTime - job.startTime) / 1000).toFixed(1)}s`);
+    logger.info(`[Job] ${job.id} completed | ${usageLine(job)}`);
   } catch (err) {
     job.status = 'failed';
     job.error = err.message || 'Translation failed.';
     job.endTime = Date.now();
-    logger.error(`[Job] ${job.id} failed: ${job.error}`);
+    logger.error(`[Job] ${job.id} FAILED: ${job.error} | ${usageLine(job)}`);
   }
 }
 
