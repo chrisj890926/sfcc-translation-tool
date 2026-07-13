@@ -24,9 +24,10 @@ body {
   min-height: 100vh;
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: flex-start; /* top-align so tall content isn't clipped */
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto; /* allow the page to scroll when content exceeds the viewport */
 }
 
 /* Background Blobs */

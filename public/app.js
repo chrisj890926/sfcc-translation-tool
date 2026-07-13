@@ -278,6 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
     errorArea.classList.add('hidden');
     resultArea.classList.add('hidden');
     progressArea.classList.remove('hidden');
+    setFormVisible(false); // collapse the input form so the progress panel fits the viewport
     renderProgress({ progress: 0, currentPhase: 'Starting…' });
 
     try {
@@ -292,10 +293,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       pollJob(data.jobId, downloadName, completeMsg);
     } catch (error) {
+      progressArea.classList.add('hidden');
+      setFormVisible(true);
       finishRun();
       showError(error.message);
     }
   });
+
+  function setFormVisible(visible) {
+    form.style.display = visible ? '' : 'none';
+  }
 
   function finishRun() {
     translateBtn.disabled = false;
@@ -314,6 +321,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!res.ok) throw new Error(status.error || 'Failed to fetch job status.');
       } catch (err) {
         clearInterval(pollTimer);
+        progressArea.classList.add('hidden');
+        setFormVisible(true);
         finishRun();
         showError(err.message);
         return;
@@ -332,14 +341,17 @@ document.addEventListener('DOMContentLoaded', () => {
           downloadLink.download = downloadName;
           resultMsg.textContent = completeMsg;
           progressArea.classList.add('hidden');
-          resultArea.classList.remove('hidden');
+          resultArea.classList.remove('hidden'); // form stays hidden; resultArea has "Translate Another File"
         } catch (err) {
+          progressArea.classList.add('hidden');
+          setFormVisible(true);
           showError(err.message);
         }
         finishRun();
       } else if (status.status === 'failed') {
         clearInterval(pollTimer);
         progressArea.classList.add('hidden');
+        setFormVisible(true);
         finishRun();
         showError(status.error || 'Translation failed.');
       }
@@ -361,6 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
   resetBtn.addEventListener('click', () => {
     if (pollTimer) clearInterval(pollTimer);
     form.reset();
+    setFormVisible(true); // bring the input form back
     selectedFiles = [];
     updateFileListUI();
     resultArea.classList.add('hidden');
