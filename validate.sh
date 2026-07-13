@@ -111,19 +111,31 @@ run_coverage() {
   $NODE "$SCRIPTS/check-translation-coverage.js" "$xml" --locales "$loc" $mo
 }
 
+run_mistrans() {
+  echo ""
+  echo "── 專有詞錯譯掃描 (clearance / graphic card support) ──"
+  local xml loc
+  xml=$(pick_file "要掃描的 catalog/library (.xml)"); need_file "$xml" || return
+  loc=$(pick_locales)
+  echo ""
+  $NODE "$SCRIPTS/find-mistranslated-terms.js" "$xml" --locales "$loc"
+}
+
 while true; do
   echo ""
   echo "======== SFCC 翻譯驗證選單 ========"
   echo "  1) Product XML       匯入前 diff (SAFE / NOT SAFE / BASELINE MISMATCH)"
   echo "  2) Page Designer XML 匯入前 diff"
   echo "  3) 漏翻 / 語言錯置掃描"
+  echo "  4) 專有詞錯譯掃描  (clearance→出清 / GPU support→支架)"
   echo "  q) 離開"
   read -r -p "選擇: " choice
   case "$choice" in
     1) run_product ;;
     2) run_pd ;;
     3) run_coverage ;;
+    4) run_mistrans ;;
     q | Q | "") echo "掰掰 👋"; exit 0 ;;
-    *) echo "  無效選項，請輸入 1 / 2 / 3 / q" ;;
+    *) echo "  無效選項，請輸入 1 / 2 / 3 / 4 / q" ;;
   esac
 done
