@@ -34,7 +34,7 @@ function countUnits(xml, mode) {
   return (xml.match(re) || []).length;
 }
 
-async function runJob(job, { files, mode, targetLanguages, provider, productIds, force }) {
+async function runJob(job, { files, mode, targetLanguages, provider, productIds, force, keepOnlyTargetLocales }) {
   try {
     job.status = 'running';
     job.fileCount = files.length;
@@ -117,7 +117,9 @@ async function runJob(job, { files, mode, targetLanguages, provider, productIds,
 
     job.setPhase('Translating');
     const translated = await Promise.all(
-      files2.map((f) => engine.translate(f.content, { mode, targetLanguages, provider, reporter: job, force }))
+      files2.map((f) =>
+        engine.translate(f.content, { mode, targetLanguages, provider, reporter: job, force, keepOnlyTargetLocales })
+      )
     );
 
     job.setPhase('Writing XML');

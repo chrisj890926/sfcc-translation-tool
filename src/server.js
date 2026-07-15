@@ -142,6 +142,15 @@ function handleTranslate(req, res) {
       // regenerates target locales, so this only changes Product behavior.
       const force = body.force === true || body.force === 'true' || body.force === 'on';
 
+      // Per-locale export: the download keeps only x-default + the selected
+      // locales, so a MERGE import never overwrites other locales. Default ON;
+      // send keepOnlyTargetLocales:false to keep the input's other locales.
+      const keepOnlyTargetLocales = !(
+        body.keepOnlyTargetLocales === false ||
+        body.keepOnlyTargetLocales === 'false' ||
+        body.keepOnlyTargetLocales === 'off'
+      );
+
       // Share one provider (and its cache) across all files in the request.
       const provider = engine.createProvider(providerName, { protectedTerms });
 
@@ -174,7 +183,7 @@ function handleTranslate(req, res) {
       const job = createJob({ provider: providerName, model });
 
       // Fire-and-forget — the browser tracks progress via the jobs endpoints.
-      runJob(job, { files, mode, targetLanguages, provider, productIds, force });
+      runJob(job, { files, mode, targetLanguages, provider, productIds, force, keepOnlyTargetLocales });
 
       res.writeHead(202, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ jobId: job.id }));

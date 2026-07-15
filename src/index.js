@@ -51,7 +51,8 @@ async function translate(xml, options = {}) {
     targetLanguages: options.targetLanguages,
     provider: options.provider,
     reporter: options.reporter,
-    force: options.force
+    force: options.force,
+    keepOnlyTargetLocales: options.keepOnlyTargetLocales
   };
   if (mode === 'product') {
     return productXmlTranslator.translateXml(xml, opts);

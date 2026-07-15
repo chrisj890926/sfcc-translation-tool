@@ -1,7 +1,13 @@
 'use strict';
 
 const { deepClone, tryParse } = require('../utils/jsonUtils');
-const { encodeHtmlEntities, decodeXmlEntities, isWellFormedXml, escapeRegExp } = require('../utils/xmlUtils');
+const {
+  encodeHtmlEntities,
+  decodeXmlEntities,
+  isWellFormedXml,
+  escapeRegExp,
+  stripUnselectedLocales
+} = require('../utils/xmlUtils');
 const logger = require('../utils/logger');
 const { NULL_REPORTER } = require('../utils/progress');
 const rules = require('./rules/pageDesignerRules');
@@ -277,12 +283,19 @@ async function translateXml(xml, options = {}) {
     resultContentBlocks.push(`    ${blockOut}`);
   }
 
-  const outputXml = [
+  let outputXml = [
     `${xmlDeclaration}${libraryOpenTag}`.trimEnd(),
     ...resultContentBlocks,
     '</library>',
     ''
   ].join('\n');
+
+  // Per-locale export: drop every locale except x-default + the translated ones,
+  // so a MERGE import touches only the selected locales (default on; pass
+  // keepOnlyTargetLocales:false to keep the input's other locales).
+  if (options.keepOnlyTargetLocales !== false) {
+    outputXml = stripUnselectedLocales(outputXml, cloneLangs);
+  }
 
   // Validation: never emit broken XML — fall back to the original on failure.
   if (!isWellFormedXml(outputXml)) {

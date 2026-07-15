@@ -6,7 +6,8 @@ const {
   encodeHtmlEntities,
   stripCData,
   wrapCData,
-  isWellFormedXml
+  isWellFormedXml,
+  stripUnselectedLocales
 } = require('../utils/xmlUtils');
 const logger = require('../utils/logger');
 const { NULL_REPORTER } = require('../utils/progress');
@@ -376,6 +377,13 @@ async function translateXml(xml, options = {}) {
 
   // Guarantee page-title precedes page-description within page-attributes.
   resultXml = reorderPageAttributes(resultXml);
+
+  // Per-locale export: drop every locale except x-default + the translated ones,
+  // so a MERGE import touches only the selected locales (default on; pass
+  // keepOnlyTargetLocales:false to keep the input's other locales).
+  if (options.keepOnlyTargetLocales !== false) {
+    resultXml = stripUnselectedLocales(resultXml, cloneLangs);
+  }
 
   // Validation: never emit broken XML — fall back to the original on failure.
   if (!isWellFormedXml(resultXml)) {

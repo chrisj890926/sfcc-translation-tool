@@ -214,6 +214,28 @@ function isWellFormedXml(xml) {
   return withoutTags.indexOf('<') === -1 && withoutTags.indexOf('>') === -1;
 }
 
+/**
+ * Keep only x-default and the given target locales; remove every other
+ * localized element — any `<tag ... xml:lang="...">...</tag>` whose lang is not
+ * kept (data, display-name, visibility-mode, short-description, subtitle, ...).
+ *
+ * Why: the translators preserve the input's existing locales and only
+ * (re)generate the selected ones. A source export normally ships every locale
+ * pre-filled with the English fallback, so a single-locale run would still
+ * carry 11 other locales — many of them English — into the download. Importing
+ * that file with MERGE then overwrites those other locales in the target (e.g.
+ * a Korean import reverts Japanese to English). Stripping to x-default + the
+ * selected locales makes a per-locale export touch only that locale on import.
+ */
+function stripUnselectedLocales(xml, keepLangs) {
+  const keep = new Set(['x-default', ...(keepLangs || [])]);
+  // Matches a localized element and its optional leading indentation, so a
+  // dropped element leaves no blank line behind. Bodies never nest the same tag
+  // (JSON data / plain text), so the non-greedy backreference close is safe.
+  const elemRe = /(?:\n[ \t]*)?<([A-Za-z0-9:_-]+)\b[^>]*\bxml:lang="([^"]+)"[^>]*>[\s\S]*?<\/\1>/g;
+  return xml.replace(elemRe, (full, tag, lang) => (keep.has(lang) ? full : ''));
+}
+
 module.exports = {
   escapeRegExp,
   decodeHtmlEntities,
@@ -225,6 +247,7 @@ module.exports = {
   stripCData,
   wrapCData,
   isWellFormedXml,
+  stripUnselectedLocales,
   mergeProductXml,
   mergeLibraryXml
 };
