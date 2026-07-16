@@ -36,11 +36,33 @@ module.exports = {
     'secondaryButtonTitle',
     'html_content',
     'richText',
-    'bodyMarkup'
+    'bodyMarkup',
+    // Additional on-page text fields discovered across the library.
+    'articleTitle',
+    'articleDesc',
+    'buttonTitle',
+    'tagLine',
+    'tagline',
+    'blockTitle',
+    'bannerCTADesc',
+    'bannerButtonTitle',
+    'collectionDesc',
+    'infoButtonTitle',
+    'bannerContent',
+    'bannerMessage'
   ],
 
   // Of the above, these contain HTML and are translated tag-aware.
-  htmlKeys: ['html_content', 'richText', 'description', 'bodyMarkup'],
+  htmlKeys: [
+    'html_content',
+    'richText',
+    'description',
+    'bodyMarkup',
+    'articleDesc',
+    'infoButtonTitle',
+    'bannerContent',
+    'bannerMessage'
+  ],
 
   // Keys that must never be translated (ids, urls, models, skus, ...).
   // Documented here for phase 2; the translator uses the translatable whitelist
