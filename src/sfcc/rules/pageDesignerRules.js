@@ -28,6 +28,7 @@ module.exports = {
     'description',
     'subtitle',
     'pretitle',
+    'pre_title',
     'label',
     'cta',
     'buttonText',
