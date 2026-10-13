@@ -113,6 +113,15 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   syncProductIdsVisibility();
 
+  // Target language Select all / Clear all
+  const langBoxes = () => document.querySelectorAll('input[name="targetLanguages"]');
+  document.getElementById('selectAllLangs').addEventListener('click', () => {
+    langBoxes().forEach(cb => { cb.checked = true; });
+  });
+  document.getElementById('clearAllLangs').addEventListener('click', () => {
+    langBoxes().forEach(cb => { cb.checked = false; });
+  });
+
   ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
     dropZone.addEventListener(eventName, preventDefaults, false);
   });
@@ -229,6 +238,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const mode = xmlFormat === 'product-section' ? 'product' : 'page-designer';
     const productIds = (formData.get('productIds') || '').trim();
     const force = document.getElementById('forceRetranslate').checked;
+
+    // An empty list would make the server fall back to its default languages.
+    if (targetLanguages.length === 0) {
+      showError('Please select at least one target language.');
+      return;
+    }
 
     // Cost safety guard (mirrors the server). Without Product IDs the whole file
     // is translated — block clearly full catalog/library uploads before sending.
