@@ -7,7 +7,7 @@
  * reports, per target locale, which translatable fields are:
  *   MISSING       - has an x-default value but no value for that locale
  *   UNTRANSLATED  - value exists but equals x-default (copied English), or is
- *                   pure ASCII where a non-Latin locale (ja/ko/zh/th) is expected
+ *                   pure ASCII where a non-Latin locale (ja/ko/zh/th/ar) is expected
  *
  * Output: console summary + a CSV of every gap + a comma-joined list of the
  * product ids that have at least one gap (paste into the app's Product IDs to
@@ -24,15 +24,16 @@ const pdRules = require('../src/sfcc/rules/pageDesignerRules');
 
 const dec = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&');
 const rx = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const CJK = /[぀-ヿ㐀-鿿가-힣฀-๿]/; // ja/zh/ko/th scripts
-const NONLATIN = new Set(['ja', 'ko', 'zh', 'th']);
+const CJK = /[぀-ヿ㐀-鿿가-힣฀-๿\u0600-\u06FF]/; // ja/zh/ko/th/ar scripts
+const NONLATIN = new Set(['ja', 'ko', 'zh', 'th', 'ar']);
 
 // Script ranges for wrong-language detection.
 const SCRIPT = {
   kana: /[぀-ゟ゠-ヿ]/, // hiragana/katakana (Japanese-specific)
   hangul: /[가-힣ᄀ-ᇿ]/, // Korean
   thai: /[฀-๿]/,
-  han: /[㐀-䶿一-鿿]/ // CJK ideographs (zh / ja-kanji)
+  han: /[㐀-䶿一-鿿]/, // CJK ideographs (zh / ja-kanji)
+  arabic: /[\u0600-\u06FF]/
 };
 // Latin-script locale signals (diacritics + common function words) for spotting
 // the wrong Latin language sitting in a locale field (e.g. French in de-DE).
@@ -67,6 +68,12 @@ function wrongLang(text, lang) {
   if (LATIN_BASES.has(base)) {
     if (SCRIPT.hangul.test(v)) return 'contains Korean';
     if (SCRIPT.kana.test(v)) return 'contains Japanese';
+    if (SCRIPT.thai.test(v)) return 'contains Thai';
+    if (SCRIPT.han.test(v)) return 'contains Chinese/Japanese';
+    if (SCRIPT.arabic.test(v)) return 'contains Arabic';
+  } else if (base === 'ar') {
+    if (SCRIPT.kana.test(v)) return 'looks Japanese';
+    if (SCRIPT.hangul.test(v)) return 'looks Korean';
     if (SCRIPT.thai.test(v)) return 'contains Thai';
     if (SCRIPT.han.test(v)) return 'contains Chinese/Japanese';
   } else if (base === 'ja') {

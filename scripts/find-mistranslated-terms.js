@@ -32,7 +32,7 @@ const norm = (raw) => {
 };
 
 const TRANSLATABLE_TAGS = ['short-description', 'page-title', 'page-description'];
-const ALL_LOCALES = ['de-DE', 'es', 'fr-FR', 'it-IT', 'id-ID', 'ja-JP', 'ko-KR', 'nl-NL', 'pt-BR', 'th-TH', 'vi-VN', 'zh-TW'];
+const ALL_LOCALES = ['de-DE', 'es', 'fr-FR', 'it-IT', 'id-ID', 'ja-JP', 'ko-KR', 'nl-NL', 'pt-BR', 'th-TH', 'vi-VN', 'zh-TW', 'ar'];
 
 // Retail "sale/clearance-sale" words per locale base. Presence when English says
 // "clearance" strongly implies the spec term was mistranslated as a sale.
@@ -48,7 +48,8 @@ const SALE = {
   nl: /uitverkoop|opruiming|korting|aanbieding/i,
   vi: /giảm giá|thanh lý|khuyến mãi|xả hàng/i,
   id: /\bobral\b|diskon|cuci gudang|\bpromo\b/i,
-  th: /ลดราคา|ล้างสต็อก|โปรโมชั่น/
+  th: /ลดราคา|ล้างสต็อก|โปรโมชั่น/,
+  ar: /تخفيض|تخفيضات|تصفية|خصم|أوكازيون|عرض خاص/
 };
 // "physical bracket / holder / anti-sag stand" words — wrong for "GPU support" spec.
 const BRACKET = {
@@ -63,7 +64,8 @@ const BRACKET = {
   nl: /beugel|steun/i,
   vi: /giá đỡ|khung đỡ|thanh chống/i,
   id: /braket|penyangga|dudukan/i,
-  th: /ขายึด|ตัวยึด|ขาตั้ง/
+  th: /ขายึด|ตัวยึด|ขาตั้ง/,
+  ar: /دعامة|حامل|مسند/
 };
 
 const base = (l) => String(l).toLowerCase().split(/[-_]/)[0];

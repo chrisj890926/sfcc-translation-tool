@@ -113,6 +113,7 @@ module.exports = {
     'pt-BR': 'Downloads',
     'th-TH': 'ดาวน์โหลด',
     'vi-VN': 'Tải xuống',
-    'zh-TW': '下載'
+    'zh-TW': '下載',
+    ar: 'التنزيلات'
   }
 };

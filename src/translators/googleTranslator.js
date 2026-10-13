@@ -23,7 +23,8 @@ const LANG_TO_TRANSLATE_CODE = {
   'pt-BR': 'pt',
   'th-TH': 'th',
   'vi-VN': 'vi',
-  'zh-TW': 'zh-TW'
+  'zh-TW': 'zh-TW',
+  ar: 'ar'
 };
 
 // Cap concurrent calls to the endpoint across the whole process.

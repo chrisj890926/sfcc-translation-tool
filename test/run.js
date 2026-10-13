@@ -327,6 +327,57 @@ function dataJson(xml, lang) {
   }
 
   // ============================================================
+  // ============================================================
+  console.log('\nArabic (ar) — RTL script round-trip');
+  // ============================================================
+  {
+    // Mock that returns real Arabic text, so the RTL script goes through the
+    // XML / JSON write-back paths instead of a Latin "[ar]" prefix.
+    class ArabicMockProvider extends TranslationProvider {
+      async _translateRawBatch(items) {
+        const out = {};
+        for (const it of items) out[it.id] = `نص مترجم: ${it.text}`;
+        return out;
+      }
+    }
+    const arProvider = () => new ArabicMockProvider({ protectedTerms: ['Cooler Master'] });
+
+    const productXmlIn = `<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns="http://www.demandware.com/xml/impex/catalog/2006-10-31" catalog-id="cm">
+  <product product-id="AR1">
+    <short-description xml:lang="x-default">&lt;p&gt;Cooler Master 120mm fan&lt;/p&gt;</short-description>
+    <custom-attributes>
+      <custom-attribute attribute-id="subtitle" xml:lang="x-default">Reliable &amp; quiet</custom-attribute>
+    </custom-attributes>
+  </product>
+</catalog>`;
+    const out = await productXml.translateXml(productXmlIn, { targetLanguages: ['ar'], provider: arProvider() });
+    ok('ar: product output well-formed XML', isWellFormedXml(out));
+    ok('ar: subtitle written as CDATA with Arabic text',
+      out.includes('<custom-attribute attribute-id="subtitle" xml:lang="ar"><![CDATA[نص مترجم: Reliable & quiet]]></custom-attribute>'));
+    const sd = (out.match(/<short-description xml:lang="ar">([\s\S]*?)<\/short-description>/) || [])[1] || '';
+    ok('ar: short-description contains Arabic', /[؀-ۿ]/.test(sd), sd);
+    ok('ar: protected term kept in Latin script', sd.includes('Cooler Master'), sd);
+    ok('ar: HTML preserved as entities', sd.includes('&lt;p&gt;') && sd.includes('&lt;/p&gt;'), sd);
+    ok('ar: x-default untouched', out.includes('<short-description xml:lang="x-default">&lt;p&gt;Cooler Master 120mm fan&lt;/p&gt;</short-description>'));
+
+    const dlXml = `<?xml version="1.0" encoding="UTF-8"?>
+<library library-id="cm">
+  <content content-id="dl-ar">
+    <type>component.commerce_assets.cmDownloadFiles</type>
+    <data xml:lang="x-default">${JSON.stringify({ files_to_download: { value: JSON.stringify([{ displayName: 'Manual', value: 'https://cm.example/dl/m?a=1&b=2' }]) } })}</data>
+  </content>
+</library>`;
+    const pdOut = await pageDesigner.translateXml(dlXml, { targetLanguages: ['ar'], provider: arProvider() });
+    ok('ar: page designer output well-formed XML', isWellFormedXml(pdOut));
+    const obj = dataJson(pdOut, 'ar');
+    ok('ar: generated localized download title', obj && obj.title === 'التنزيلات', obj ? `title=${obj.title}` : 'no data');
+    let files = null;
+    try { files = JSON.parse(obj.files_to_download.value); } catch (e) { /* files stays null */ }
+    ok('ar: displayName translated to Arabic', Array.isArray(files) && files[0].displayName === 'نص مترجم: Manual');
+    ok('ar: URL preserved exactly', Array.isArray(files) && files[0].value === 'https://cm.example/dl/m?a=1&b=2');
+  }
+
   console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed`);
   process.exit(failed === 0 ? 0 : 1);
 })().catch((e) => {
